@@ -76,8 +76,31 @@ def get_champs_mag3(x, y):
     
     return B
 
-# def simulation()
-
+class cell:
+    X = np.array([1,0,0])
+    Y = np.array([0,1,0])
+    Z = np.array([0,0,1])
+    
+    def __init__(self, x, y, Xi, Yi, B, V):
+        self.x = x
+        self.X_index = Xi
+        self.y = y
+        self.Y_index = Yi
+        self.B = get_champs_mag3(x, y)
+        self.v = np.array([0, 0, 0])
+        self.a = np.array([0, 0, 0])
+        self.p = 1e3 #kg/m^3
+        self.h = h
+        self.L = L
+        self.l = l
+        self.V = h*l*L #m^3
+        self.m = self.p * self.V
+        
+    def update(self, j, dt):
+        # force appliquee a l'eau: Force de Laplace, Force de viscosite, Force de gravite
+        # self.a = 1/self.m * (self.B * self.j * self.V)*X 
+        # self.v = self.v + self.a * dt
+        pass 
 print(get_champs_mag(1.5, 10))
 
 X = np.linspace(0.5, 2, 100)
