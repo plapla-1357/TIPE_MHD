@@ -256,19 +256,17 @@ def show3DMap():
     ax = fig.add_subplot(111, projection='3d')
     
     # Création d'une surface continue
-    X_unique = np.unique(ChampMag["X"])
-    Y_unique = np.unique(ChampMag["Y"])
-    X_grid, Y_grid = np.meshgrid(X_unique, Y_unique)
+    X = np.linspace(0.5, 2, 50)
+    Y = np.linspace(-1, 8, 50)
+    X_grid, Y_grid = np.meshgrid(X, Y)
     B_grid = np.zeros_like(X_grid)
     
-    for i in range(len(Y_unique)):
-        for j in range(len(X_unique)):
-            mask = (ChampMag["X"] == X_unique[j]) & (ChampMag["Y"] == Y_unique[i])
-            if mask.any():
-                B_grid[i, j] = ChampMag["B"][mask]
+    for i in range(len(Y)):
+        for j in range(len(X)):
+            B_grid[i, j] = get_champs_mag6(X[j], Y[i])
     
     ax.plot_surface(X_grid, Y_grid, B_grid, cmap='plasma', edgecolor='none')
-    ax.set_title("Champ Magnétique en fonction de la position (X, Y, B)")
+    ax.set_title("Champ Magnétique Interpolé en fonction de la position (X, Y, B)")
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("B")
@@ -277,8 +275,8 @@ def show3DMap():
 
 
 if __name__ == "__main__":
-    showHeatMap()
-    # show3DMap()
+    # showHeatMap()
+    show3DMap()
     
 
 

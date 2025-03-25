@@ -16,11 +16,12 @@ data = {
 
 df = pd.DataFrame(data)
 pivot_table = df.pivot_table(values="B", index="Y", columns="X")
-plt.pcolormesh(pivot_table, cmap="plasma", shading="gouraud")
-plt.xlabel("X")
-plt.ylabel("Y")
-plt.title("Colormap of Magnetic Field B")
-plt.colorbar()
+plt.pcolormesh(pivot_table, cmap="plasma", shading="auto")
+plt.axis("equal")
+plt.xlabel("X (cm)")
+plt.ylabel("Y (cm)")
+plt.colorbar(label="B (mT)")
+plt.title("Champs magnétique en fonction de la position")
 plt.show() 
 
 
