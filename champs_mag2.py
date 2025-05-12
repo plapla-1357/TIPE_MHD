@@ -16,7 +16,9 @@ data = {
 
 df = pd.DataFrame(data)
 pivot_table = df.pivot_table(values="B", index="Y", columns="X")
-plt.pcolormesh(pivot_table, cmap="plasma", shading="auto")
+x = pivot_table.columns.values
+y = pivot_table.index.values
+plt.pcolormesh(x, y, pivot_table.values, cmap="plasma", shading="auto")
 plt.axis("equal")
 plt.xlabel("X (cm)")
 plt.ylabel("Y (cm)")

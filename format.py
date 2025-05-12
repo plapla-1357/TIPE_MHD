@@ -15,6 +15,6 @@ def format(name):
         file.write(filedata)
         
 if __name__ == "__main__":
-    name = input("fichier a formater: ")
+    name = "./data/experience" + input("fichier a formater: ") +".csv"
     format(name)
         
