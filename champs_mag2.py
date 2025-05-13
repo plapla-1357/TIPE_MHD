@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+
+plt.rcParams.update({'font.size': 22})
 data = {
     "X": [1.5]*19 + [1]*19 + [2]*19 + [0.5]*19,
     "Y": [-1, -0.5, 0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6, 6.5, 7, 7.5, 8] * 4,
