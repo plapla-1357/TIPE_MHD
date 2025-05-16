@@ -5,7 +5,7 @@ def format(name):
         filedata = f.read()
     print(filedata)
     filedata = filedata.replace(",", ".") # remplace les , en .
-    filedata = filedata.replace(";", ",") # remplace les ; en ,
+    filedata = filedata.replace("\t", ",") # remplace les ; en ,
     lines = filedata.split("\n")
     lines = lines[1:] # retirer la première ligne
     lines[0] = lines[0][:-1] # retire la dernière virgule des entètes
