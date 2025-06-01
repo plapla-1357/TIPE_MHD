@@ -6,7 +6,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 nx = 41
 ny = 41
-nt = 1000
+nt = 10
 dx = 2 / (nx - 1)
 dy = 2 / (ny - 1)
 dt = 0.1
