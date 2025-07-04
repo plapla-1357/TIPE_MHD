@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import warnings
+plt.rcParams.update({'font.size': 17})
 
 
 #l'objectif est de simuler l'ecoulement dans un moteur MHD
@@ -21,6 +22,8 @@ ChampMag = {
         0.8, 3.4, 8.1, 13.3, 15.8, 15.5, 14.1, 15, 17, 17.5, 15.9, 14.5, 15.6, 16.8, 16, 11.2, 5.9, 2.6, 0.7
     ]
 }
+
+ChampMag["B"] = np.array(ChampMag["B"])*10 
 
 def get_real_champs_mag(x, y):
     return ChampMag["B"][ChampMag["X"].index(x) + ChampMag["Y"].index(y)]
@@ -267,9 +270,9 @@ def show3DMap():
     
     ax.plot_surface(X_grid, Y_grid, B_grid, cmap='plasma', edgecolor='none')
     ax.set_title("Champ Magnétique Interpolé en fonction de la position (X, Y, B)")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("B")
+    ax.set_xlabel("X (cm)", labelpad=20)
+    ax.set_ylabel("Y (cm)", labelpad=20)
+    ax.set_zlabel("B (mT)", labelpad=20)
     
     plt.show()
 

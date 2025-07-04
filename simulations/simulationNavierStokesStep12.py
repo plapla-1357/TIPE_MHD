@@ -27,10 +27,9 @@ l = 9e-2 #m    longeur de l'electrode
 h = 8e-3 #m    hauteur d'eau au niveau des electrodes
 e = 1.5e-2 #m epaiseur entre les electrodes
 S = l*h
-B0 = 11.22e-2  # T champ magnétique constant
+B0 = 11.22e1  # T champ magnétique constant
 U = 3 #V
 E0 = U/e  # V/m champ électrique constant (pour la modelisation 2)
-E = np.ones((nx, ny))*E0 
 
 ## variables chimiques
 m = 60 # g  masse de sel
@@ -40,7 +39,12 @@ Cond_Na = 5.008e-3 #S.m^2.mol^-1
 Cond_Cl = 7.631e-3 #S.m2.mol^-1       (S = omh-1)
 
 
-useMesure = False  # True pour utiliser les mesures de champs mag, False pour un champ magnétique constant
+# useMesure = False  # True pour utiliser les mesures de champs mag, False pour un champ magnétique constant
+champMagType = 1
+# 1: champ magnétique constant
+# 2: champ magnétique mesuré
+# 3: champs magnétique en crénaux
+
 # choix du graphique affiché
 showVecVitesse = False
 showSteam = False
@@ -50,19 +54,23 @@ showacceleration = False
 showInfluanceI = False
 showChampsMag = False
 showCompareModels = False
-showInfluance_e = True     #! Attention: 1min40 d'execution
-showInfluance_e_Econst = False
+showInfluance_e = False     #! Attention: 1min40 d'execution
+showInfluance_e_Pconst = False  #! 1min d'execution par tour de boucle
 showInfluance_m = False
+showInfluance_m_Pconst = False
+show3D_Pconst = False   #! 10min d'execution
+showInfluenceP = False
+showInfluenceB = True
 
 # choix du modèle de force appliquée
-model = 1
+model = 2
 # 1: modèle 1 : hypothèse j const avec j = I/S
 # 2: modèle 2 : hypothèse: loi d'ohm pour un fluide en mouvement j = Cond*(E - u*B)
 ##########################################################
 
 ######## consequences (variables deduites) ########
 
-if useMesure:
+if champMagType == 2:
     xs = -1e-2
     ys = 0.5e-2
 else: 
@@ -77,17 +85,15 @@ X, Y = np.meshgrid(x, y)
 
 def getConductivity(m):
     C = (m / M) / V  # mol.m-3 concentration de la solution 
-    Cond = C * (Cond_Na + Cond_Cl)  # S.m-1 conductivité de la solution
+    # Données tabulées (à 25°C) : concentration en mol/L et conductivité en S/m
+    concentration_mol_L = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) # saturation a 6mol.L-1
+    conductivity_S_m = np.array([10.8, 17.2, 20.5, 21.9, 22.3, 21.8])
+    sigma_interp = interp1d(concentration_mol_L, conductivity_S_m, kind='cubic', fill_value="extrapolate")
 
-    # # Données tabulées (à 25°C) : concentration en mol/L et conductivité en S/m
-    # concentration_mol_L = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
-    # conductivity_S_m = np.array([10.8, 17.2, 20.5, 21.9, 22.3, 21.8])
-    # sigma_interp = interp1d(concentration_mol_L, conductivity_S_m, kind='cubic', fill_value="extrapolate")
+    def get_conductivity(concentration_mol_L):
+        return float(sigma_interp(concentration_mol_L))
 
-    # def get_conductivity(concentration_mol_L):
-    #     return float(sigma_interp(concentration_mol_L))
-
-    # Cond = get_conductivity(C/ 1000)  # S/m conductivité de la solution (convertie de mol/L à mol/m3)
+    Cond = get_conductivity(C/ 1000)  # S/m conductivité de la solution (convertie de mol/L à mol/m3)
     return Cond
 Cond = getConductivity(m)
 I = Cond * E0 * S  # A courant appliqué (pour la modelisation 2)
@@ -174,20 +180,26 @@ def get_champs_mag6(x, y):
     B = lambda1 * B1 + lambda2 * B2 + lambda3 * B3
     return B
 
-if useMesure:
+if champMagType == 2:  # champ magnétique mesuré
     B = np.zeros_like(X)
     for i in range(len(x)):
         for j in range(len(y)):
             B[i, j] = get_champs_mag6(y[j], x[i])
     B = B.T
-else:
+elif champMagType == 1:  # champ magnétique en constant
     B = np.ones_like(X)*B0
-
+elif champMagType == 3:  # champ magnétique crénaux
+    B = np.zeros_like(X)
+    B[int((l/dx)//4): -int((l/dx)//4),:] = np.ones_like(B[int((l/dx)//4): -int((l/dx)//4),:])*B0
+    B = B.T
+else:
+    raise ValueError ("ya un probleme")
 # on en deduit la force appliquée
 def get_Fy(u):
     if model == 1:  # modèle 1 : hypothèse j const avec j = I/S
         Fy = I/S*B /rho
     elif model == 2:  # modèle 2 : hypothèse: loi d'ohm pour un fluide en mouvement j = Cond*(E - u*B)
+        E = np.ones((nx, ny))*E0 
         Fy = Cond*(E - u*B)*B / rho
         # print(Fy)
     return Fy
@@ -356,6 +368,7 @@ def simulation_navier_stokes():
         
         udiff = (np.sum(u) - np.sum(un)) / np.sum(u)
         stepcount += 1
+    # print(stepcount*dt)
     return u, v, p, stepcount
 
 def mesure_acceleration(nt):
@@ -396,6 +409,11 @@ def getMeanSpeed(V_x0, e):
 # chanps de vecteurs vitesses
 if showVecVitesse:
     u, v, p, stepcount = simulation_navier_stokes()
+    print("U: ", U)
+    print("I: ", I)
+    print("vitesse moyenne: ", getMeanSpeed(u[:, int((len(x)-1)//2)], e))
+    print("delta P", np.max(p) - np.min(p))
+    print("rendement: ", getMeanSpeed(u[:, int((len(x)-1)//2)], e) * e * h*(np.max(p)-np.min(p))/ (I *U))
     fig = plt.figure(figsize=(11,7), dpi=100)
     plt.pcolormesh(X, Y, p, cmap= "viridis", shading="auto", alpha=0.5)
     plt.colorbar(label='p (Pa)')
@@ -454,25 +472,30 @@ if showacceleration:
 if showInfluanceI:
     Imin = 0.1
     Imax = 3.5
-    N = 100
+    N = 20
     Ilist = np.linspace(Imin, Imax, N)
     A0list = []
+    vlist = []
     for i in tqdm.tqdm(Ilist):
         I = i
         Fy = I/S*B /rho
-        A0list.append(getA0())
+        # A0list.append(getA0())
+        u, v, p, stepcount = simulation_navier_stokes()
+        vlist.append(getMeanSpeed(u[:, int((len(x)-1)//2)], e))
     fig = plt.figure(figsize=(11,7), dpi=100)
-    plt.plot(Ilist, A0list, "+",  label="A0")
-    a, b = np.polyfit(Ilist, A0list, 1)
+    plt.plot(Ilist, vlist, "+", label="Vitesse moyenne")
+    # fig = plt.figure(figsize=(11,7), dpi=100)
+    # plt.plot(Ilist, A0list, "+",  label="A0")
+    # a, b = np.polyfit(Ilist, A0list, 1)
     # Affichage du coefficient a en notation scientifique LaTeX
-    a_exp = int(np.floor(np.log10(abs(a)))) if a != 0 else 0
-    a_mant = a / 10**a_exp if a != 0 else 0
-    plt.plot(Ilist, a*Ilist + b, label=fr"Régression linéaire : $A_0 = {a_mant:.2f} \times 10^{{{a_exp}}} I + {b:.2f}$")
-    plt.xlabel("Intensité (A)")
-    plt.ylabel("Accélération (m/s²)")
-    plt.legend()
-    plt.grid()
-    plt.title("Influence de l'intensité sur l'accélération du fluide")
+    # a_exp = int(np.floor(np.log10(abs(a)))) if a != 0 else 0
+    # a_mant = a / 10**a_exp if a != 0 else 0
+    # plt.plot(Ilist, a*Ilist + b, label=fr"Régression linéaire : $A_0 = {a_mant:.2f} \times 10^{{{a_exp}}} I + {b:.2f}$")
+    # plt.xlabel("Intensité (A)")
+    # plt.ylabel("Accélération (m/s²)")
+    # plt.legend()
+    # plt.grid()
+    # plt.title("Influence de l'intensité sur l'accélération du fluide")
     
 if showChampsMag:
     fig = plt.figure(figsize=(11,7), dpi=100)
@@ -534,13 +557,38 @@ if showInfluance_m:
     plt.ylabel("Vitesse (m/s)")
     plt.title(f"Vitesse en fonction de la masse de soluté\n e = {e*1e2:.1f}cm E = {E0} V/m")
     plt.legend()
+    plt.grid()   
+    m = mi
+    
+if showInfluance_m_Pconst:
+    mi = m # garde en memoire la valeur par defaut pour evité que ca cause des problemes
+    fig = plt.figure(figsize=(11,7), dpi=100)
+    for P in tqdm.tqdm(range(5, 31, 5)):
+        meanSpeedList = []
+        speedMax = []
+        massList = []
+        for m in tqdm.tqdm(range (10, 101, 5)):
+            Cond = getConductivity(m)
+            G = Cond * S / e
+            U = (P/G)**0.5
+            E0 = U / e
+            I = Cond * E0 * S  # A courant appliqué (pour la modelisation 2)
+            u, v, p, stepcount = simulation_navier_stokes()
+            x0 = (len(x)-1)//2
+            V_x0 = u[:, int(x0)]
+            massList.append(m)
+            speedMax.append(max(V_x0))
+            meanSpeedList.append(getMeanSpeed(V_x0, e))
+        plt.plot(massList, meanSpeedList, "o-", label= f"P = {P} W")
+    plt.xlabel("Masse (g)")
+    plt.ylabel("Vitesse (m/s)")
+    plt.legend(loc="upper left")
     plt.grid()
     
     
-        
-        
-        
-    m = mi
+    
+    
+    
     
 if showInfluance_e:
     fig = plt.figure(figsize=(11,7), dpi=100)
@@ -580,60 +628,136 @@ if showInfluance_e:
     plt.plot(epaiseur, meanSpeedList, "o-", label="Vitesse moyenne")
     plt.xlabel("Épaisseur entre les électrodes (m)")
     plt.ylabel("Vitesse (m/s)")
-    plt.title(f"Vitesse en fonction de l'éccartement entre les électrodes\n m = {m} g, U = {U} V")
+    plt.title(f"Vitesse en fonction de l'écartement entre les électrodes\n m = {m} g, U = {U} V")
     plt.legend()
     plt.grid()
-if showInfluance_e_Econst:
+
+if showInfluance_e_Pconst:
     fig = plt.figure(figsize=(11,7), dpi=100)
-    meanSpeedList = []
-    speedMax = []
+    for P in tqdm.tqdm(range(5, 20, 5), position=2):
+        meanSpeedList = []
+        speedMax = []
+        epaiseur = []
+        for i in tqdm.tqdm(range (1, 81, 6), position=1):
+            e = (2+ i/5)*1e-3
+            # e = (5.7 +i/200)*1e-3
+            Cond = getConductivity(m)
+            G = Cond*S/e # conductance
+            U = (P/G)**0.5  # tension pour une puissance constante
+            E0 = U/e
+            I = Cond * E0 * S
+            dx = l / (nx - 1)
+            dy = e / (ny - 1)
+            x = np.linspace(xs, xs+l, ny)
+            y = np.linspace(ys, ys+e, nx)
+            X, Y = np.meshgrid(x, y)
+            u, v, p, stepcount = simulation_navier_stokes()
+            x0 = (len(x)-1)//2
+            V_x0 = u[:, int(x0)]
+            Re = max(V_x0)*1.5e-2/nu
+            meanSpeedList.append(getMeanSpeed(V_x0, e))
+            speedMax.append(max(V_x0))
+            epaiseur.append(e)
+        
+        # plt.plot(epaiseur, speedMax, "o-", label="Vitesse maximale")
+        plt.plot(np.array(epaiseur)*1e3, meanSpeedList, "o-", label=f"Vitesse moyenne, P = {P} W")
+        plt.axvline(x=epaiseur[np.argmax(meanSpeedList)]*1e3, color='black', linestyle='--', label=f"Épaisseur optimale : {epaiseur[np.argmax(meanSpeedList)]*1e3:.1f} mm\n $V_{{m, max}}$ : {max(meanSpeedList):.4f} m/s")
+        plt.axhline(y=max(meanSpeedList), color='black', linestyle='--')
+        plt.xlabel("Épaisseur entre les électrodes (mm)")
+        plt.ylabel("Vitesse (m/s)")
+        plt.title(f"Vitesse en fonction de l'écartement entre les électrodes\n m = {m} g")
+        plt.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+        plt.tight_layout()
+        plt.grid()
+        
+if show3D_Pconst:
+    # fait le graphique 3D de la vitesse en fonction de l'epaisseur et de la masse
+    fig = plt.figure(figsize=(11,7), dpi=100)
+    ax = fig.add_subplot(111, projection='3d')
     epaiseur = []
-    E0 = 200
-    for i in tqdm.tqdm(range (1, 21, 2)):
-        e = (2+ i/5)*1e-3
+    massList = []
+    meanSpeedList = []
+    P = 10 #W
+    for m in tqdm.tqdm(range(10, 101, 10)):
+        for i in range(1, 41, 2):
+            e = (2 + i / 5) * 1e-3
+            Cond = getConductivity(m)
+            G = Cond * S / e
+            U = (P / G) ** 0.5
+            E0 = U / e
+            I = Cond * E0 * S
+            dx = l / (nx - 1)
+            dy = e / (ny - 1)
+            x = np.linspace(xs, xs + l, ny)
+            y = np.linspace(ys, ys + e, nx)
+            X, Y = np.meshgrid(x, y)
+            u, v, p, stepcount = simulation_navier_stokes()
+            x0 = (len(x) - 1) // 2
+            V_x0 = u[:, int(x0)]
+            epaiseur.append(e)
+            massList.append(m)
+            meanSpeedList.append(getMeanSpeed(V_x0, e))
+    #graphique 3D
+    ax.plot_trisurf(np.array(epaiseur)*1e3, massList, meanSpeedList, cmap='plasma', edgecolor='none')
+    ax.set_xlabel('Épaisseur (mm)')
+    ax.set_ylabel('Masse (g)')
+    ax.set_zlabel('Vitesse (m/s)')
+    ax.set_title(f"Vitesse en fonction de l'écartement entre les électrodes et de la masse\n P = {P} W")
+    plt.tight_layout()
+    # plt.legend()
+    
+if showInfluenceP:
+    e = 5.8e-3   # ecartement optimal pour maximiser la vitesse
+    m = 100   # masse de saturation 
+    Puissance = []
+    VitesseMoyenne = []
+    for P in tqdm.tqdm(range(1, 100, 2)):
+        Cond = getConductivity(m)
+        G = Cond * S / e
+        U = (P / G) ** 0.5
+        E0 = U / e
+        I = Cond * E0 * S
         dx = l / (nx - 1)
         dy = e / (ny - 1)
-        x = np.linspace(xs, xs+l, ny)
-        y = np.linspace(ys, ys+e, nx)
+        x = np.linspace(xs, xs + l, ny)
+        y = np.linspace(ys, ys + e, nx)
         X, Y = np.meshgrid(x, y)
+        u, v, p, stepcount = simulation_navier_stokes()
+        x0 = (len(x) - 1) // 2
+        V_x0 = u[:, int(x0)]
+        Puissance.append(P)
+        VitesseMoyenne.append(getMeanSpeed(V_x0, e))
+    a, b = np.polyfit(np.array(Puissance)**0.5, VitesseMoyenne, 1)
+    print(a, b)
+    fig = plt.figure(figsize=(11,7), dpi=100)
+    plt.plot(Puissance, VitesseMoyenne, "o", label="Vitesse moyenne simulation")
+    plt.plot(Puissance, a*np.array(Puissance)**0.5 + b, "r--", label=f"regression \n$V_m = {a:.2e} \\times \sqrt {{P}}$")
+    plt.legend()
+    plt.xlabel("P (W)")
+    plt.ylabel("$V_{moy}$ (m/s)")
+    plt.title(f"Vitesse moyenne en fonction de la puissance\n m = {m} g, e = {e*1e3:.1f} mm")
+    plt.grid()
+    
+if showInfluenceB:
+    Blist = np.linspace(0.01, 1.5, 20)
+    meanSpeedList = []
+    speedMax = []
+    for B in tqdm.tqdm(Blist):
         u, v, p, stepcount = simulation_navier_stokes()
         x0 = (len(x)-1)//2
         V_x0 = u[:, int(x0)]
-        Re = max(V_x0)*1.5e-2/nu
-        plt.plot(V_x0, y,"--", label=f"e={e*1e3:.1f} mm\n$R_e = ${Re:.2e}", )
-        plt.legend()
-        plt.xlabel("Vitesse en ($m.s^{-1}$)")
-        plt.ylabel("y (m)")
-        plt.title("Vitesse selon Y pour différentes épaisseurs entre les électrodes")
         meanSpeedList.append(getMeanSpeed(V_x0, e))
         speedMax.append(max(V_x0))
-        epaiseur.append(e)
     
     fig = plt.figure(figsize=(11,7), dpi=100)
-    plt.plot(1/np.array(epaiseur), meanSpeedList, "+")
-    a, b = np.polyfit(1/np.array(epaiseur), meanSpeedList, 1)
-    plt.plot(1/np.array(epaiseur), a*(1/np.array(epaiseur)) + b, label=fr"Régression linéaire : $V_m = {a:.2f} \times 1/e + {b:.2f}$")
-    plt.plot(1/np.array(epaiseur), speedMax, "+")
-    c, d = np.polyfit(1/np.array(epaiseur), speedMax, 1)
-    plt.plot(1/np.array(epaiseur), c*(1/np.array(epaiseur)) + d, label=f"Régression linéaire : $V_{max} =" + f"{c:.2f}" +"$\times 1/e + $"+f"{d:.2f}$")
-    plt.grid()
-    plt.legend()
-    plt.xlabel("1/Épaisseur entre les électrodes (m⁻¹)")
-    plt.ylabel("Vitesse moyenne (m/s)")
-    plt.title("Vitesse moyenne en fonction de l'inverse de l'épaisseur entre les électrodes")
-
-    fig = plt.figure(figsize=(11,7), dpi=100)
-    plt.plot(epaiseur, speedMax, "o-", label="Vitesse maximale")
-    plt.plot(epaiseur, meanSpeedList, "o", label="Vitesse moyenne")
-    a_exp = int(np.floor(np.log10(abs(a)))) if a != 0 else 0
-    a_mant = a / 10**a_exp if a != 0 else 0
+    plt.plot(Blist, meanSpeedList, "o-", label="Vitesse moyenne")
+    a, b = np.polyfit(Blist, meanSpeedList, 1)
     b_exp = int(np.floor(np.log10(abs(b)))) if b != 0 else 0
     b_mant = b / 10**b_exp if b != 0 else 0
-    plt.plot(epaiseur, a*(1/np.array(epaiseur)) + b,"--", label=fr"Régression: $V_m = {a_mant:.2f} \cdot 10^{{{a_exp}}} \times \frac {{1}} {{e}} + {b_mant:.2f} \cdot 10^{{{b_exp}}}$")
-    # plt.plot(epaiseur, c*(1/np.array(epaiseur)) + d, label=fr"Régression linéaire : $V_{max} = {c:.2f} \times 1/e + {d:.2f}$")
-    plt.xlabel("Épaisseur entre les électrodes (m)")
+    plt.plot(Blist, a*np.array(Blist) + b,"r--", label=fr"Régression linéaire : $V_m = {a:.2f} B + {b_mant:.2f} \cdot 10^{{{b_exp}}}$")
+    plt.xlabel("Champ magnétique (T)")
     plt.ylabel("Vitesse (m/s)")
-    plt.title(f"Vitesse en fonction de l'éccartement entre les électrodes\n m = {m} g, E = {U} V/m")
+    plt.title(f"Vitesse en fonction du champ magnétique\n m = {m} g")
     plt.legend()
     plt.grid()
 

@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import tqdm
 import pandas as pd
+from scipy.interpolate import interp1d
 plt.rcParams.update({'font.size': 18})
 
 
@@ -21,29 +22,54 @@ dt = .001
 rho = 1000#kg.m-3
 eta = 1e-3
 nu = eta/rho  #viscosité cinematique        
-I = 2 #A      courant apliqué
+I = 3 #A      courant apliqué
 l = 9e-2 #m    longeur de l'electrode
 h = 8e-3 #m    hauteur d'eau au niveau des electrodes
 e = 1.5e-2 #m epaiseur entre les electrodes
 S = l*h
 B0 = 11.22e-2  # T champ magnétique constant
+U = 3 #V
+E0 = U/e  # V/m champ électrique constant (pour la modelisation 2)
 
-useMesure = True  # True pour utiliser les mesures de champs mag, False pour un champ magnétique constant
+## variables chimiques
+m = 60 # g  masse de sel
+M = 58.44 # g.mol-1  masse molaire du chlorure de sodium
+V = 300e-6 # m3 volume de la solution
+Cond_Na = 5.008e-3 #S.m^2.mol^-1
+Cond_Cl = 7.631e-3 #S.m2.mol^-1       (S = omh-1)
+
+
+# useMesure = False  # True pour utiliser les mesures de champs mag, False pour un champ magnétique constant
+champMagType = 2
+# 1: champ magnétique constant
+# 2: champ magnétique mesuré
+# 3: champs magnétique en crénaux
 
 # choix du graphique affiché
-showVecVitesse = True
-showSteam = True
-showSpeed = True
-showProfileVitesse = True
+showVecVitesse = False
+showSteam = False
+showSpeed = False
+showProfileVitesse = False
 showacceleration = False
-showInfluanceI = False
-showChampsMag = True
+showInfluanceI = True
+showChampsMag = False
+showCompareModels = False
+showInfluance_e = False     #! Attention: 1min40 d'execution
+showInfluance_e_Pconst = False  #! 1min d'execution par tour de boucle
+showInfluance_m = False
+showInfluance_m_Pconst = False
+show3D_Pconst = False   #! 10min d'execution
+showInfluenceP = False
 
+# choix du modèle de force appliquée
+model = 2
+# 1: modèle 1 : hypothèse j const avec j = I/S
+# 2: modèle 2 : hypothèse: loi d'ohm pour un fluide en mouvement j = Cond*(E - u*B)
 ##########################################################
 
 ######## consequences (variables deduites) ########
 
-if useMesure:
+if champMagType == 2:
     xs = -1e-2
     ys = 0.5e-2
 else: 
@@ -56,7 +82,20 @@ x = np.linspace(xs, xs+l, ny)
 y = np.linspace(ys, ys+e, nx)
 X, Y = np.meshgrid(x, y)
 
+def getConductivity(m):
+    C = (m / M) / V  # mol.m-3 concentration de la solution 
+    # Données tabulées (à 25°C) : concentration en mol/L et conductivité en S/m
+    concentration_mol_L = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]) # saturation a 6mol.L-1
+    conductivity_S_m = np.array([10.8, 17.2, 20.5, 21.9, 22.3, 21.8])
+    sigma_interp = interp1d(concentration_mol_L, conductivity_S_m, kind='cubic', fill_value="extrapolate")
 
+    def get_conductivity(concentration_mol_L):
+        return float(sigma_interp(concentration_mol_L))
+
+    Cond = get_conductivity(C/ 1000)  # S/m conductivité de la solution (convertie de mol/L à mol/m3)
+    return Cond
+Cond = getConductivity(m)
+I = Cond * E0 * S  # A courant appliqué (pour la modelisation 2)
 
 ##### champs mag #####
 ChampMag = {
@@ -140,17 +179,29 @@ def get_champs_mag6(x, y):
     B = lambda1 * B1 + lambda2 * B2 + lambda3 * B3
     return B
 
-if useMesure:
+if champMagType == 2:  # champ magnétique mesuré
     B = np.zeros_like(X)
     for i in range(len(x)):
         for j in range(len(y)):
             B[i, j] = get_champs_mag6(y[j], x[i])
     B = B.T
-else:
+elif champMagType == 1:  # champ magnétique en constant
     B = np.ones_like(X)*B0
-
+elif champMagType == 3:  # champ magnétique crénaux
+    B = np.zeros_like(X)
+    B[int((l/dx)//4): -int((l/dx)//4),:] = np.ones_like(B[int((l/dx)//4): -int((l/dx)//4),:])*B0
+    B = B.T
+else:
+    raise ValueError ("ya un probleme")
 # on en deduit la force appliquée
-Fy = I/S*B /rho
+def get_Fy(u):
+    if model == 1:  # modèle 1 : hypothèse j const avec j = I/S
+        Fy = I/S*B /rho
+    elif model == 2:  # modèle 2 : hypothèse: loi d'ohm pour un fluide en mouvement j = Cond*(E - u*B)
+        E = np.ones((nx, ny))*E0 
+        Fy = Cond*(E - u*B)*B / rho
+        # print(Fy)
+    return Fy
 Fx = 0
 
 
@@ -207,11 +258,11 @@ def pressure_poisson_periodic(p, b, dx, dy):
         # condition aux bords 
         p[-1, :] =p[-2, :]  # dp/dy = 0 a y = e
         p[0, :] = p[1, :]  # dp/dy = 0 a y = 0
-    
+
     return p
 
 
-def get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu):
+def get_U_V(un, vn, p, u, v, dt, dx, dy, rho, nu):
     
     #cas de la matrique M_{n-2, n-2} au centre ou les condition au limite n'ont pas d'influance
     u[1:-1, 1:-1] = (un[1:-1, 1:-1] -
@@ -225,7 +276,7 @@ def get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu):
                     (un[1:-1, 2:] - 2 * un[1:-1, 1:-1] + un[1:-1, 0:-2]) +
                     dt / dy**2 * 
                     (un[2:, 1:-1] - 2 * un[1:-1, 1:-1] + un[0:-2, 1:-1])) + 
-                    Fy[1: -1, 1: -1] * dt)
+                    get_Fy(un)[1: -1, 1: -1] * dt)
 
     v[1:-1, 1:-1] = (vn[1:-1, 1:-1] -
                     un[1:-1, 1:-1] * dt / dx * 
@@ -249,7 +300,7 @@ def get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu):
                 nu * (dt / dx**2 * 
                 (un[1:-1, 0] - 2 * un[1:-1,-1] + un[1:-1, -2]) +
                 dt / dy**2 * 
-                (un[2:, -1] - 2 * un[1:-1, -1] + un[0:-2, -1])) + Fy[1: -1, -1] * dt)
+                (un[2:, -1] - 2 * un[1:-1, -1] + un[0:-2, -1])) + get_Fy(un)[1: -1, -1] * dt)
 
     # condition periodique gauche
     u[1:-1, 0] = (un[1:-1, 0] - un[1:-1, 0] * dt / dx *
@@ -261,7 +312,7 @@ def get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu):
                 nu * (dt / dx**2 * 
                 (un[1:-1, 1] - 2 * un[1:-1, 0] + un[1:-1, -1]) +
                 dt / dy**2 *
-                (un[2:, 0] - 2 * un[1:-1, 0] + un[0:-2, 0])) + Fy[1: -1, 0] * dt)
+                (un[2:, 0] - 2 * un[1:-1, 0] + un[0:-2, 0])) + get_Fy(un)[1: -1, 0] * dt)
 
     # condition periodique droite
     v[1:-1, -1] = (vn[1:-1, -1] - un[1:-1, -1] * dt / dx *
@@ -292,7 +343,12 @@ def get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu):
     u[0, :] = 0
     u[-1, :] = 0
     v[0, :] = 0
-    v[-1, :]=0
+    v[-1, :]= 0
+    
+    #test d'obstacle
+    # u[20, 20] = 0
+    # v[20, 20] = 0
+    
     return u, v
 
 
@@ -312,7 +368,7 @@ def simulation_navier_stokes():
         b = build_up_b(rho, dt, dx, dy, u, v)
         p = pressure_poisson_periodic(p, b, dx, dy)
 
-        u, v = get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu)
+        u, v = get_U_V(un, vn, p, u, v, dt, dx, dy, rho, nu)
         
         udiff = (np.sum(u) - np.sum(un)) / np.sum(u)
         stepcount += 1
@@ -341,7 +397,7 @@ def mesure_acceleration(nt):
         b = build_up_b(rho, dt, dx, dy, u, v)
         p = pressure_poisson_periodic(p, b, dx, dy)
 
-        u, v = get_U_V(un, vn, p, u, v, Fy, Fx, dt, dx, dy, rho, nu)
+        u, v = get_U_V(un, vn, p, u, v, dt, dx, dy, rho, nu)
         ax.append(((u - un) / dt)[int(ny//2), int(ny//2)])
         ay.append(((v - vn) / dt)[int(ny//2), int(ny//2)])
     return ax, ay
@@ -349,9 +405,12 @@ def mesure_acceleration(nt):
 def getA0():
     return mesure_acceleration(3)[0][2]
 
+def getMeanSpeed(V_x0, e):
+    return (1/e) * sum(np.array(V_x0)*dy) 
+
 
 # chanps de vecteurs vitesses
-if showVecVitesse:
+def showVecVitesse():
     u, v, p, stepcount = simulation_navier_stokes()
     fig = plt.figure(figsize=(11,7), dpi=100)
     plt.pcolormesh(X, Y, p, cmap= "viridis", shading="auto", alpha=0.5)
@@ -366,7 +425,7 @@ if showSteam:
     # fig = plt.figure(figsize=(11,7), dpi=100)
     fig = plt.figure(figsize=(11,7), dpi=100)
     plt.streamplot(X, Y, u, v)
-    plt.pcolormesh(X, Y, p, alpha=0.5, cmap="viridis", shading="gouraud")
+    plt.pcolormesh(X, Y, p, alpha=0.5, cmap="viridis", shading="auto")
     plt.colorbar(label="p (Pa)")
     plt.contour(X, Y, p, cmap=cm.viridis)
     plt.xlabel('Y (m)')
@@ -383,7 +442,8 @@ if showSpeed:# affiche la vitesse selon Y
     plt.colorbar(label="u (m/s)")
     plt.title("Vitesse u en fonction de la position")
     
-if showProfileVitesse:
+def showProfileVitesse():
+    global nu
     # affiche du profil de vitesse selon Y
     fig = plt.figure(figsize=(11,7), dpi=100)
     for i in tqdm.tqdm(range(2)):
@@ -396,48 +456,76 @@ if showProfileVitesse:
     plt.xlabel("Vitesse selon $\\vec u_y$ (m/s)")
     plt.ylabel("Y (m)")
     plt.legend(loc="center left")
-        
-if showacceleration:
-    nt = 5000
-    ax, ay = mesure_acceleration(nt)
-    fig = plt.figure(figsize=(11,7), dpi=100) 
-    t = np.linspace(0, nt*dt, nt)   
-    plt.plot(t, ax, label="accerleration :$a_y$")
-    plt.xlabel("Temps (s)")
-    plt.ylabel("Accélération (m/s²)")
-    plt.title("Accélération du fluide")
-    plt.legend()
-
-if showInfluanceI:
-    Imin = 0.1
-    Imax = 3.5
-    N = 100
-    Ilist = np.linspace(Imin, Imax, N)
-    A0list = []
-    for i in tqdm.tqdm(Ilist):
-        I = i
-        Fy = I/S*B /rho
-        A0list.append(getA0())
-    fig = plt.figure(figsize=(11,7), dpi=100)
-    plt.plot(Ilist, A0list, "+",  label="A0")
-    a, b = np.polyfit(Ilist, A0list, 1)
-    # Affichage du coefficient a en notation scientifique LaTeX
-    a_exp = int(np.floor(np.log10(abs(a)))) if a != 0 else 0
-    a_mant = a / 10**a_exp if a != 0 else 0
-    plt.plot(Ilist, a*Ilist + b, label=fr"Régression linéaire : $A_0 = {a_mant:.2f} \times 10^{{{a_exp}}} I + {b:.2f}$")
-    plt.xlabel("Intensité (A)")
-    plt.ylabel("Accélération (m/s²)")
-    plt.legend()
-    plt.grid()
-    plt.title("Influence de l'intensité sur l'accélération du fluide")
     
-if showChampsMag:
-    fig = plt.figure(figsize=(11,7), dpi=100)
-    plt.pcolormesh(X, Y, B, cmap="plasma", shading="auto")
-    plt.colorbar(label="Champ magnétique (T)")
-    plt.xlabel("Y (m)")
-    plt.ylabel("X (m)")
-    plt.title("Champ magnétique")
+def liveSimulation():
+    #initial conditions
+    u = np.zeros((ny, nx))
+    v = np.zeros((ny, nx))
 
+    p = np.zeros((ny, nx))
+
+    b = np.zeros((ny, nx))
+    udiff = 1
+    stepcount = 0
+    for i in tqdm.tqdm(range(10000)):
+        un = u.copy()
+        vn = v.copy()
+
+        b = build_up_b(rho, dt, dx, dy, u, v)
+        p = pressure_poisson_periodic(p, b, dx, dy)
+
+        u, v = get_U_V(un, vn, p, u, v, dt, dx, dy, rho, nu)
+        
+        if i % 100 == 0:
+            vmax = np.max(np.abs(v))  # Vitesse maximale (valeur absolue)
+            # print(f"t = {i*dt:.2f} s — Vitesse max = {vmax:.4f} m/s")
+
+            plt.clf()
+            # plt.imshow(u, cmap='jet', origin='lower', extent=[0, l, 0, e])
+            # plt.colorbar(label='Vitesse (m/s)')
+            # plt.title(f"Vitesse à t = {i*dt:.2f} s")
+            omega = (v[1:, :-1] - v[:-1, :-1])/dx - (u[:-1, 1:] - u[:-1, :-1])/dy
+            plt.imshow(omega, cmap='RdBu', extent=[x.min(), x.max(), y.min(), y.max()])
+            plt.colorbar(label='Vorticité')
+            plt.title('Champ de vorticité')
+            plt.xlabel('x (m)')
+            plt.ylabel('y (m)')
+            plt.pause(0.1)
+
+# liveSimulation()  # Lancer la simulation en direct
+
+def liveVitesse():
+    #initial conditions
+    u = np.zeros((ny, nx))
+    v = np.zeros((ny, nx))
+    p = np.zeros((ny, nx))
+
+    b = np.zeros((ny, nx))
+    udiff = 1
+    stepcount = 0
+    
+    ms = []
+    T = []
+    for i in tqdm.tqdm(range(100000)):
+        un = u.copy()
+        vn = v.copy()
+
+        b = build_up_b(rho, dt, dx, dy, u, v)
+        p = pressure_poisson_periodic(p, b, dx, dy)
+
+        u, v = get_U_V(un, vn, p, u, v, dt, dx, dy, rho, nu)
+        
+        if i % 100 == 0:
+            ms.append(getMeanSpeed(u, e)[len(x)//2])
+            T.append(i*dt)
+            plt.clf()
+            plt.plot(T, ms, label="Vitesse moyenne selon $\\vec u_y$ (m/s)")
+            plt.legend()
+            plt.xlabel("Vitesse selon $\\vec u_y$ (m/s)")
+            plt.ylabel("Y (m)")
+            plt.title(f"Vitesse à t = {i*dt:.2f} s")
+            plt.pause(0.1)
+
+# liveVitesse()     
 plt.show()
         

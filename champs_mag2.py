@@ -17,6 +17,8 @@ data = {
 # faire une colormap du champs magnétique
 
 df = pd.DataFrame(data)
+df["B"] = np.array(data["B"])*10
+print(data["B"])
 pivot_table = df.pivot_table(values="B", index="Y", columns="X")
 x = pivot_table.columns.values
 y = pivot_table.index.values

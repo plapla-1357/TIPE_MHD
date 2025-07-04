@@ -15,6 +15,7 @@ data = {
     ]
 }
 df = pd.DataFrame(data)
+data["B"] = data["B"]*10 #convertion en mT
 
 # Création du graphe 3D
 fig = plt.figure(figsize=(10, 7))
